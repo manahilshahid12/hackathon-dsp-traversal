@@ -74,6 +74,7 @@ def main():
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
+            posted_submodels = []
 
             # LOOP 1: through each asset
             for asset in ASSETS:
@@ -81,9 +82,11 @@ def main():
                 print(f"Processing Asset: {asset}")
                 print(f"{'='*60}")
 
+                # Create list of sm_ids for this asset
+                sm_ids = [f"{SM_URN_PREFIX}{asset}{suffix}" for suffix in SM_URN_SUFFIX]
+
                 # LOOP 2: through each submodel for this asset
-                for suffix in SM_URN_SUFFIX:
-                    sm_id = f"{SM_URN_PREFIX}{asset}{suffix}"
+                for sm_id in sm_ids:
                     url = f"{SOURCE_URL}/{sm_id}"
 
                     resp = requests.get(
@@ -92,6 +95,7 @@ def main():
                         verify=False,
                         timeout=TIMEOUT_SECONDS,
                     )
+                    
                     if resp.status_code != 200:
                         print(
                             f"[WARN] Failed to fetch {sm_id}: {resp.status_code} {resp.text}"
@@ -100,42 +104,40 @@ def main():
                         continue
 
                     submodel = resp.json()
+                    
                     if not isinstance(submodel, dict):
                         yield ("failed", sm_id)
                         continue
 
-                    # LOOP 3: through each data source item in the submodel
-                    data_items = submodel.get("dataSourceItems", [])
-                    if not data_items:
-                        # if no dataSourceItems, post the submodel itself
-                        data_items = [submodel]
+                    label = submodel.get("id")
 
-                    for item in data_items:
-                        label = item.get("id", "<unknown>")
-                        if DRY_RUN:
-                            print(f"[DRY-RUN] Would POST item: {label}")
-                            yield ("dry_run", label)
-                            continue
+                    if DRY_RUN:
+                        print(f"[DRY-RUN] Would POST item: {label}")
+                        yield ("dry_run", label)
+                        continue
 
-                        post_resp = requests.post(
-                            DEST_URL,
-                            json=item,
-                            headers=headers,
-                            verify=False,
-                            timeout=TIMEOUT_SECONDS,
+                    post_resp = requests.post(
+                        DEST_URL,
+                        json=submodel,
+                        headers=headers,
+                        verify=False,
+                        timeout=TIMEOUT_SECONDS,
+                    )
+
+                    if post_resp.status_code in (200, 201):
+                        print(f"[OK] Posted item: {label}")
+                        posted_submodels.append(submodel)
+                        yield ("posted", label)
+                    elif post_resp.status_code == 409:
+                        print(f"[SKIP] Already exists (409): {label}")
+                        yield ("skipped", label)
+                    else:
+                        print(
+                            f"[FAIL] {label}: HTTP {post_resp.status_code} {post_resp.text}"
                         )
-
-                        if post_resp.status_code in (200, 201):
-                            print(f"[OK] Posted item: {label}")
-                            yield ("posted", label)
-                        elif post_resp.status_code == 409:
-                            print(f"[SKIP] Already exists (409): {label}")
-                            yield ("skipped", label)
-                        else:
-                            print(
-                                f"[FAIL] {label}: HTTP {post_resp.status_code} {post_resp.text}"
-                            )
-                            yield ("failed", label)
+                        yield ("failed", label)
+            
+            yield ("posted_submodels", posted_submodels)
 
         print("Requesting OAuth2 token...")
         if DRY_RUN:
@@ -152,6 +154,7 @@ def main():
         failed = 0
 
         for result_type, label in fetch_and_post_submodels(token):
+
             count += 1
             if result_type == "posted":
                 posted += 1
