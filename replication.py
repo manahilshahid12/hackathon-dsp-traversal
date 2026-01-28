@@ -54,7 +54,7 @@ def main():
         SUBPROTOCOL_BODY_ID = os.getenv("SUBPROTOCOL_BODY_ID", "123")
         SUBPROTOCOL_BODY_DSP_ENDPOINT = os.getenv("SUBPROTOCOL_BODY_DSP_ENDPOINT", "http://edc.control.plane/api/v1/dsp")
         SUBPROTOCOL_BODY = f"id={SUBPROTOCOL_BODY_ID};dspEndpoint={SUBPROTOCOL_BODY_DSP_ENDPOINT}"
-
+        DTR_SM_DESCR_URL = os.getenv("MX_THINK_DTR_SHELL_DESCR_URL", "foo")
         DATA_PLANE_URL = os.getenv("DATA_PLANE_URL", "123")
 
         TIMEOUT_SECONDS = 20
@@ -106,6 +106,36 @@ def main():
             "submodelDescriptors": submodel_descriptors,
         }
 
+    def post_sm_descriptor(json, token):
+
+        headers = {
+            "Authorization": f"Bearer {token}" if token else "",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+        if DRY_RUN:
+            print(f"Not posting submodel description to {DTR_SM_DESCR_URL} due to dry run.")
+            return
+
+        print(f"POSTing to {DTR_SM_DESCR_URL} ")
+        post_resp = requests.post(
+            DTR_SM_DESCR_URL,
+            json=json,
+            headers=headers,
+            verify=False,
+            timeout=TIMEOUT_SECONDS,
+        )
+
+        if post_resp.status_code in (200, 201):
+            print(f"[OK] Posted item.")
+        elif post_resp.status_code == 409:
+            print(f"[SKIP] Already exists (409):")
+        else:
+            print(
+                f"[FAIL]: HTTP {post_resp.status_code} {post_resp.text}"
+            )
+ 
     def create_submodel_descriptor(submodel_ids):
         if not submodel_ids or not isinstance(submodel_ids, list):
                 raise ValueError("submodel_id must be a non-empty list")
@@ -144,7 +174,6 @@ def main():
             }
             )
             return submodel_descriptors
-
         
         def fetch_and_post_submodels(token):
             """Fetch each submodel, then post its dataSourceItems."""
