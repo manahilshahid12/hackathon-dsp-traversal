@@ -30,6 +30,8 @@ def to_base64url(input_str: str) -> str:
     encoded = base64.urlsafe_b64encode(raw)
     return encoded.decode("utf-8").rstrip("=")
 
+
+
 def main():
     with load_env_from_file("env.txt"):
         SOURCE_URL = os.getenv(
@@ -60,6 +62,73 @@ def main():
         TIMEOUT_SECONDS = 20
         DRY_RUN = os.getenv("DRY_RUN", "False").lower() == "true"
 
+        def create_shell_descriptor(asset, submodel_descriptors):
+            """
+            Create an AAS shell-descriptor dict with the requested shape.
+
+            Args:
+                global_asset_id: Your global asset ID (IRI/URN/string).
+                asset: Name of the Asset for id_short
+                submodel_descriptors: A list of submodel descriptor dicts that will be attached as-is.
+
+            Returns:
+                A dictionary matching your shell descriptor format.
+            """
+            if not asset or not isinstance(asset, str):
+                raise ValueError("asset must be a non-empty string.")
+            
+            if not isinstance(submodel_descriptors, list) or not all(isinstance(d, dict) for d in submodel_descriptors):
+                raise ValueError("submodel_descriptors must be a list of dicts.")
+            
+            shell_id = f"urn:uuid:{uuid.uuid4()}"
+
+            return {
+                "id": shell_id,
+                "idShort": asset,
+                "globalAssetId": asset,
+                "submodelDescriptors": submodel_descriptors,
+            }
+        
+        def create_submodel_descriptor(submodel_ids):
+            if not submodel_ids or not isinstance(submodel_ids, list):
+                    raise ValueError("submodel_id must be a non-empty list")
+            
+            submodel_descriptors = []
+
+            for submodel_id in submodel_ids:
+                base64url_submodel_id = to_base64url(submodel_id)
+                submodel_endpoint = f"{DATA_PLANE_URL}/{base64url_submodel_id}"
+
+                submodel_descriptors.append({
+                    "id": submodel_id,
+                    "semanticId": None,
+                    "endpoints": [
+                        {
+                        "interface": "SUBMODEL-3.0",
+                        "protocolInformation": {
+                            "href": submodel_endpoint,
+                            "endpointProtocol": "HTTP",
+                            "endpointProtocolVersion": [
+                            "1.1"
+                            ],
+                            "subprotocol": "DSP",
+                            "subprotocolBody": SUBPROTOCOL_BODY,
+                            "subprotocolBodyEncoding": "plain",
+                            "securityAttributes": [
+                            {
+                                "type": "NONE",
+                                "key": "NONE",
+                                "value": "NONE"
+                            }
+                            ]
+                        }
+                        }
+                    ]
+                }
+                )
+            return submodel_descriptors
+
+        
         def get_oauth_token():
             """Request OAuth2 client-credentials access token."""
             data = {
@@ -79,73 +148,6 @@ def main():
                 raise RuntimeError("Token response did not contain 'access_token'.")
             return token
 
-    def create_shell_descriptor(asset, submodel_descriptors):
-        """
-        Create an AAS shell-descriptor dict with the requested shape.
-
-        Args:
-            global_asset_id: Your global asset ID (IRI/URN/string).
-            asset: Name of the Asset for id_short
-            submodel_descriptors: A list of submodel descriptor dicts that will be attached as-is.
-
-        Returns:
-            A dictionary matching your shell descriptor format.
-        """
-        if not asset or not isinstance(asset, str):
-            raise ValueError("asset must be a non-empty string.")
-        
-        if not isinstance(submodel_descriptors, list) or not all(isinstance(d, dict) for d in submodel_descriptors):
-            raise ValueError("submodel_descriptors must be a list of dicts.")
-        
-        shell_id = f"urn:uuid:{uuid.uuid4()}"
-
-        return {
-            "id": shell_id,
-            "idShort": asset,
-            "globalAssetId": asset,
-            "submodelDescriptors": submodel_descriptors,
-        }
-
-    def create_submodel_descriptor(submodel_ids):
-        if not submodel_ids or not isinstance(submodel_ids, list):
-                raise ValueError("submodel_id must be a non-empty list")
-        
-        submodel_descriptors = []
-
-        for submodel_id in submodel_ids:
-            base64url_submodel_id = to_base64url(submodel_id)
-            submodel_endpoint = f"{DATA_PLANE_URL}/{base64url_submodel_id}"
-
-            submodel_descriptors.append({
-                "id": submodel_id,
-                "semanticId": None,
-                "endpoints": [
-                    {
-                    "interface": "SUBMODEL-3.0",
-                    "protocolInformation": {
-                        "href": submodel_endpoint,
-                        "endpointProtocol": "HTTP",
-                        "endpointProtocolVersion": [
-                        "1.1"
-                        ],
-                        "subprotocol": "DSP",
-                        "subprotocolBody": SUBPROTOCOL_BODY,
-                        "subprotocolBodyEncoding": "plain",
-                        "securityAttributes": [
-                        {
-                            "type": "NONE",
-                            "key": "NONE",
-                            "value": "NONE"
-                        }
-                        ]
-                    }
-                    }
-                ]
-            }
-            )
-        return submodel_descriptors
-
-        
         def fetch_and_post_submodels(token):
             """Fetch each submodel, then post its dataSourceItems."""
             headers = {
@@ -217,9 +219,9 @@ def main():
                         )
                         yield ("failed", label)
             
-            submodel_descriptors = create_submodel_descriptor(posted_submodels)
-            shell_descriptors = create_shell_descriptor(asset,submodel_descriptors)
-            
+                submodel_descriptors = create_submodel_descriptor(posted_submodels)
+                shell_descriptors = create_shell_descriptor(asset,submodel_descriptors)
+                
             yield ("posted_submodels", posted_submodels)
 
         print("Requesting OAuth2 token...")
