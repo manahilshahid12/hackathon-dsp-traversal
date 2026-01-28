@@ -90,16 +90,40 @@ def main():
             }
         
         def create_submodel_descriptor(submodel_ids):
-            if not submodel_ids or not isinstance(submodel_ids, list):
-                    raise ValueError("submodel_id must be a non-empty list")
-            
             submodel_descriptors = []
-        return {
-            "id": shell_id,
-            "idShort": asset,
-            "globalAssetId": asset,
-            "submodelDescriptors": submodel_descriptors,
-        }
+
+            for submodel_id in submodel_ids:
+                base64url_submodel_id = to_base64url(submodel_id)
+                submodel_endpoint = f"{DATA_PLANE_URL}/{base64url_submodel_id}"
+
+                submodel_descriptors.append({
+                    "id": submodel_id,
+                    "semanticId": None,
+                    "endpoints": [
+                        {
+                        "interface": "SUBMODEL-3.0",
+                        "protocolInformation": {
+                            "href": submodel_endpoint,
+                            "endpointProtocol": "HTTP",
+                            "endpointProtocolVersion": [
+                            "1.1"
+                            ],
+                            "subprotocol": "DSP",
+                            "subprotocolBody": SUBPROTOCOL_BODY,
+                            "subprotocolBodyEncoding": "plain",
+                            "securityAttributes": [
+                            {
+                                "type": "NONE",
+                                "key": "NONE",
+                                "value": "NONE"
+                            }
+                            ]
+                        }
+                        }
+                    ]
+                }
+                )
+            return submodel_descriptors
 
     def post_sm_descriptor(json, token):
 
@@ -137,164 +161,166 @@ def main():
         
         submodel_descriptors = []
 
-            for submodel_id in submodel_ids:
-                base64url_submodel_id = to_base64url(submodel_id)
-                submodel_endpoint = f"{DATA_PLANE_URL}/{base64url_submodel_id}"
+        for submodel_id in submodel_ids:
+            base64url_submodel_id = to_base64url(submodel_id)
+            submodel_endpoint = f"{DATA_PLANE_URL}/{base64url_submodel_id}"
 
-                submodel_descriptors.append({
-                    "id": submodel_id,
-                    "semanticId": None,
-                    "endpoints": [
+            submodel_descriptors.append({
+                "id": submodel_id,
+                "semanticId": None,
+                "endpoints": [
+                    {
+                    "interface": "SUBMODEL-3.0",
+                    "protocolInformation": {
+                        "href": submodel_endpoint,
+                        "endpointProtocol": "HTTP",
+                        "endpointProtocolVersion": [
+                        "1.1"
+                        ],
+                        "subprotocol": "DSP",
+                        "subprotocolBody": SUBPROTOCOL_BODY,
+                        "subprotocolBodyEncoding": "plain",
+                        "securityAttributes": [
                         {
-                        "interface": "SUBMODEL-3.0",
-                        "protocolInformation": {
-                            "href": submodel_endpoint,
-                            "endpointProtocol": "HTTP",
-                            "endpointProtocolVersion": [
-                            "1.1"
-                            ],
-                            "subprotocol": "DSP",
-                            "subprotocolBody": SUBPROTOCOL_BODY,
-                            "subprotocolBodyEncoding": "plain",
-                            "securityAttributes": [
-                            {
-                                "type": "NONE",
-                                "key": "NONE",
-                                "value": "NONE"
-                            }
-                            ]
+                            "type": "NONE",
+                            "key": "NONE",
+                            "value": "NONE"
                         }
-                        }
-                    ]
-                }
-                )
-            return submodel_descriptors
+                        ]
+                    }
+                    }
+                ]
+            }
+            )
+        return submodel_descriptors
 
         
-        def get_oauth_token():
-            """Request OAuth2 client-credentials access token."""
-            data = {
-                "grant_type": "client_credentials",
-                "client_id": CLIENT_ID,
-                "client_secret": CLIENT_SECRET,
-            }
-            resp = requests.post(
-                TOKEN_URL, data=data, verify=False, timeout=TIMEOUT_SECONDS
+    def get_oauth_token():
+        """Request OAuth2 client-credentials access token."""
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+        }
+        resp = requests.post(
+            TOKEN_URL, data=data, verify=False, timeout=TIMEOUT_SECONDS
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Token request failed ({resp.status_code}): {resp.text}"
             )
-            if resp.status_code != 200:
-                raise RuntimeError(
-                    f"Token request failed ({resp.status_code}): {resp.text}"
-                )
-            token = resp.json().get("access_token")
-            if not token:
-                raise RuntimeError("Token response did not contain 'access_token'.")
-            return token
+        token = resp.json().get("access_token")
+        if not token:
+            raise RuntimeError("Token response did not contain 'access_token'.")
+        return token
 
-        def fetch_and_post_submodels(token):
-            """Fetch each submodel, then post its dataSourceItems."""
-            headers = {
-                "Authorization": f"Bearer {token}" if token else "",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            }
+    def fetch_and_post_submodels(token):
+        """Fetch each submodel, then post its dataSourceItems."""
+        headers = {
+            "Authorization": f"Bearer {token}" if token else "",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        
+
+        # LOOP 1: through each asset
+        for asset in ASSETS:
+            print(f"\n{'='*60}")
+            print(f"Processing Asset: {asset}")
+            print(f"{'='*60}")
             posted_submodels = []
 
-            # LOOP 1: through each asset
-            for asset in ASSETS:
-                print(f"\n{'='*60}")
-                print(f"Processing Asset: {asset}")
-                print(f"{'='*60}")
+            # Create list of sm_ids for this asset
+            sm_ids = [f"{SM_URN_PREFIX}{asset}{suffix}" for suffix in SM_URN_SUFFIX]
 
-                # Create list of sm_ids for this asset
-                sm_ids = [f"{SM_URN_PREFIX}{asset}{suffix}" for suffix in SM_URN_SUFFIX]
+            # LOOP 2: through each submodel for this asset
+            for sm_id in sm_ids:
+                url = f"{SOURCE_URL}/{sm_id}"
 
-                # LOOP 2: through each submodel for this asset
-                for sm_id in sm_ids:
-                    url = f"{SOURCE_URL}/{sm_id}"
-
-                    resp = requests.get(
-                        url,
-                        headers={"Accept": "application/json"},
-                        verify=False,
-                        timeout=TIMEOUT_SECONDS,
-                    )
-                    
-                    if resp.status_code != 200:
-                        print(
-                            f"[WARN] Failed to fetch {sm_id}: {resp.status_code} {resp.text}"
-                        )
-                        yield ("failed", sm_id)
-                        continue
-
-                    submodel = resp.json()
-                    
-                    if not isinstance(submodel, dict):
-                        yield ("failed", sm_id)
-                        continue
-
-                    label = submodel.get("id")
-
-                    if DRY_RUN:
-                        print(f"[DRY-RUN] Would POST item: {label}")
-                        yield ("dry_run", label)
-                        continue
-
-                    post_resp = requests.post(
-                        DEST_URL,
-                        json=submodel,
-                        headers=headers,
-                        verify=False,
-                        timeout=TIMEOUT_SECONDS,
-                    )
-
-                    if post_resp.status_code in (200, 201):
-                        print(f"[OK] Posted item: {label}")
-                        posted_submodels.append(label)
-                        yield ("posted", label)
-                    elif post_resp.status_code == 409:
-                        print(f"[SKIP] Already exists (409): {label}")
-                        posted_submodels.append(label)
-                        yield ("skipped", label)
-                    else:
-                        print(
-                            f"[FAIL] {label}: HTTP {post_resp.status_code} {post_resp.text}"
-                        )
-                        yield ("failed", label)
-            
-                submodel_descriptors = create_submodel_descriptor(posted_submodels)
-                shell_descriptors = create_shell_descriptor(asset,submodel_descriptors)
+                resp = requests.get(
+                    url,
+                    headers={"Accept": "application/json"},
+                    verify=False,
+                    timeout=TIMEOUT_SECONDS,
+                )
                 
-            yield ("posted_submodels", posted_submodels)
+                if resp.status_code != 200:
+                    print(
+                        f"[WARN] Failed to fetch {sm_id}: {resp.status_code} {resp.text}"
+                    )
+                    yield ("failed", sm_id)
+                    continue
 
-        print("Requesting OAuth2 token...")
-        if DRY_RUN:
-            print("[DRY-RUN] Skipping token request.")
-            token = None
-        else:
-            token = get_oauth_token()
-            print("Token acquired.")
+                submodel = resp.json()
+                
+                if not isinstance(submodel, dict):
+                    yield ("failed", sm_id)
+                    continue
 
-        print("Fetching and posting submodels and their data source items...")
-        count = 0
-        posted = 0
-        skipped_409 = 0
-        failed = 0
+                label = submodel.get("id")
 
-        for result_type, label in fetch_and_post_submodels(token):
+                if DRY_RUN:
+                    print(f"[DRY-RUN] Would POST item: {label}")
+                    yield ("dry_run", label)
+                    continue
 
-            count += 1
-            if result_type == "posted":
-                posted += 1
-            elif result_type == "skipped":
-                skipped_409 += 1
-            elif result_type == "failed":
-                failed += 1
+                post_resp = requests.post(
+                    DEST_URL,
+                    json=submodel,
+                    headers=headers,
+                    verify=False,
+                    timeout=TIMEOUT_SECONDS,
+                )
 
-        print("\n--- Summary ---")
-        print(f"Total source items: {count}")
-        print(f"Posted:            {posted}")
-        print(f"Skipped (409):     {skipped_409}")
-        print(f"Failed:            {failed}")
+                if post_resp.status_code in (200, 201):
+                    print(f"[OK] Posted item: {label}")
+                    posted_submodels.append(label)
+                    yield ("posted", label)
+                elif post_resp.status_code == 409:
+                    print(f"[SKIP] Already exists (409): {label}")
+                    posted_submodels.append(label)
+                    yield ("skipped", label)
+                else:
+                    print(
+                        f"[FAIL] {label}: HTTP {post_resp.status_code} {post_resp.text}"
+                    )
+                    yield ("failed", label)
+        
+            submodel_descriptors = create_submodel_descriptor(posted_submodels)
+            shell_descriptor = create_shell_descriptor(asset,submodel_descriptors)
+            post_sm_descriptor(shell_descriptor, token)
+            
+        yield ("posted_submodels", posted_submodels)
+
+    print("Requesting OAuth2 token...")
+    if DRY_RUN:
+        print("[DRY-RUN] Skipping token request.")
+        token = None
+    else:
+        token = get_oauth_token()
+        print("Token acquired.")
+
+    print("Fetching and posting submodels and their data source items...")
+    count = 0
+    posted = 0
+    skipped_409 = 0
+    failed = 0
+
+    for result_type, label in fetch_and_post_submodels(token):
+
+        count += 1
+        if result_type == "posted":
+            posted += 1
+        elif result_type == "skipped":
+            skipped_409 += 1
+        elif result_type == "failed":
+            failed += 1
+
+    print("\n--- Summary ---")
+    print(f"Total source items: {count}")
+    print(f"Posted:            {posted}")
+    print(f"Skipped (409):     {skipped_409}")
+    print(f"Failed:            {failed}")
 
 
 if __name__ == "__main__":
