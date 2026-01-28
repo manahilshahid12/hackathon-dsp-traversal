@@ -37,7 +37,10 @@ def main():
         CLIENT_SECRET   = os.getenv("MX_THINK_CLIENT_SECRET", "my-secret")
 
         SM_URN_PREFIX = "urn%3Aag.em%3Asm%3A"
-        SM_URN_SUFFIX = "%3Apcf%3A1.0.0"
+        SM_URN_SUFFIX = [
+            "%3Apcf%3A1.0.0",
+            "%3Apcf%3A2.0.0"
+        ]
 
         ASSETS = [
             "train.1",
@@ -47,7 +50,7 @@ def main():
         ]
 
         TIMEOUT_SECONDS = 20
-        DRY_RUN = True
+        DRY_RUN = os.getenv("DRY_RUN", "False").lower() == "true"
         # ---------------------------------------------------------
 
 
@@ -82,7 +85,7 @@ def main():
                 "Content-Type": "application/json",
             }
 
-            submodel_ids = [f"{SM_URN_PREFIX}{asset}{SM_URN_SUFFIX}" for asset in ASSETS]
+            submodel_ids = [f"{SM_URN_PREFIX}{asset}{suffix}" for asset in ASSETS for suffix in SM_URN_SUFFIX]
             
             for sm_id in submodel_ids:
                 url = f"{SOURCE_URL}/{sm_id}"
